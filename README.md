@@ -12,10 +12,10 @@ Here we design some online algorithms and evaluate their competitivity against t
 ## The Algorithms
 
 Each algorithm has at least 4 arguments
-- inst :: char, instance name (for plots)
-- k :: int, number of agents
-- sites :: [int, int] list, the locations of places,
-- demands :: int list, the places where the servers must go, in order 
+* inst :: char, instance name (for plots)
+* k :: int, number of agents
+* sites :: [int, int] list, the locations of places,
+* demands :: int list, the places where the servers must go, in order 
 
 - One agent algorithm : Only move one agent
 - Nearest agent :  Move nearest agent
