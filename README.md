@@ -17,6 +17,7 @@ Each algorithm has at least 4 arguments
 * sites :: [int, int] list, the locations of places,
 * demands :: int list, the places where the servers must go, in order 
 
+Algorithms :
 - One agent algorithm : Only move one agent
 - Nearest agent :  Move nearest agent
 - Nearest agent positioned :  Put agents on the diagonal then move nearest agent
