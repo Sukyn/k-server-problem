@@ -49,3 +49,6 @@ Algorithms :
 - Clean comments (some are not up-to-date)
 - Add comments
 - Write a one-two pages report
+- Add verbosity parameter
+- Make a better files management
+- Implement some lecture algorithms (See Papadimitriou 1995 (WFA), Mądry 2011 (Randomized algorithm) and Page replacement algorithms)
