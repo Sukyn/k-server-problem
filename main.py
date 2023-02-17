@@ -12,15 +12,75 @@ fileSet = set()
 # Define the size of the grid
 grid_size = 100
 
-# Create the 2D grid using NumPy
-grid = np.zeros((grid_size, grid_size))
+
+class Instance:
+    '''
+    Instance of the k-servers problem. Should be treated as immutable.
+    The given file is parsed upon construction.
+    [filename]: original file
+    [opt]: cost of optimal solution
+    [k]: number of servers
+    [sites]: positions of the sites
+    [requests]: list of site ID (i.e. index of the site in [sites])
+    '''
+
+    def __init__(self, filename):
+        self.filename = filename
+        self.opt = 0
+        self.k = 0
+        self.sites = []
+        self.requests = []
+
+        with open(filename, mode='r', encoding="utf8") as file_p:
+
+            # Check if we have parsed all sites (and then go to demands)
+            ended_sites = -1
+
+            for i, line in enumerate(file_p):
+
+                # Get opt at line 2
+                if i == 1:
+                    self.opt = int(line)
+
+                # Get k at line 5
+                elif i == 4:
+                    self.k = int(line)
+
+                # Get sites from line 8 to line k (variable)
+                elif i >= 7 and ended_sites == -1:
+                    if line == "\n":  # No more sites
+                        ended_sites = i + 2
+                    else:
+                        self.sites.append(list(map(int, line.strip().split(" "))))
+
+                # Get requests from line k+2 to end of file
+                # (should only be one line usually)
+                elif i >= ended_sites > -1:
+                    self.requests = self.requests + list(map(int, line.strip().split(" ")))
+            file_p.close()
 
 
-def make_videos_from_images(inst_v, algo_p):
+class Grid:
+    '''
+    Auxiliary class to solve an instance using an online algorithm.
+    The same instance can be shared by multiple grids.
+    [inst]: instance being solved
+    [size]: size of the grid (length = width)
+    [grid]: actual grid data structure
+    [servers]: current position of the servers
+    '''
+    def __init__(self, size, inst):
+        self.inst = inst
+        self.size = size
+        self.grid = np.zeros((size, size))
+        self.servers = [(0, 0) for _ in range(inst.k)]
 
-    name = inst_v.split("/")[1]
-    folder = inst_v.split("/")[0]
-    print("Starting video : ", inst_v, algo_p)
+
+def make_videos_from_images(inst, algo_p):
+
+    name = inst.filename.split("/")[1]
+    folder = inst.filename.split("/")[0]
+    print("Starting video : ", inst.filename, algo_p)
 
     images = [img for img in os.listdir(image_folder + folder) if img.endswith(".png")
                     and img.startswith(name + algo_p)]
@@ -40,339 +100,177 @@ def make_videos_from_images(inst_v, algo_p):
     video.release()
     print("Ended video : ", video_name)
 
-def plot_grid_and_servers(inst, nb, grid, servers, algo, dist):
+
+def plot_grid_and_servers(inst, nb, grid, algo, dist):
     # Create a new plot
     plt.clf()
 
     # Plot the grid using imshow
-    plt.imshow(grid, cmap='binary', vmin=0, vmax=1)
+    plt.imshow(grid.grid, cmap='binary', vmin=0, vmax=1)
 
     # Plot the servers using scatter
-    x, y = zip(*servers)
+    x, y = zip(*grid.servers)
     plt.scatter(x, y, c='r')
 
     # Set the plot axis limits
-    plt.xlim([0, grid.shape[0]])
-    plt.ylim([0, grid.shape[1]])
+    plt.xlim([0, grid.grid.shape[0]])
+    plt.ylim([0, grid.grid.shape[1]])
     plt.title("Algorithme : " + algo + ", distance totale : " + str(dist))
     # Show the plot
     zero_numb = 10 - len(str(nb))
-    plt.savefig("plots/" + inst + algo + "0"*zero_numb + str(nb) + ".png")
-
-
-
-def parse_file(file_name):
-
-    opt_parse = 0
-    k_parse = 0
-    sites_parse = []
-    demands_parse = []
-
-    with open(file_name, mode='r', encoding="utf8") as file_p:
-
-        # Check if we have parsed all sites (and then go to demands)
-        ended_sites = -1
-
-        for i, line in enumerate(file_p):
-
-            # Get opt at line 2
-            if i == 1:
-                opt_parse = int(line)
-
-            # Get k at line 5
-            elif i == 4:
-                k_parse = int(line)
-
-            # Get sites from line 8 to line k (variable)
-            elif i >= 7 and ended_sites == -1:
-                if line == "\n":  # No more sites
-                    ended_sites = i + 2
-                else:
-                    sites_parse.append(list(map(int, line.strip().split(" "))))
-
-            # Get requests from line k+2 to end of file
-            # (should only be one line usually)
-            elif i >= ended_sites > -1:
-                demands_parse = demands_parse + list(map(int, line.strip().split(" ")))
-
-        file_p.close()
-    return opt_parse, k_parse, sites_parse, demands_parse
+    plt.savefig("plots/" + inst.filename + algo + "0"*zero_numb + str(nb) + ".png")
 
 
 def distance(point1, point2):
-    '''Using Manhattan distance, i.e. agents can't travel diagonals'''
+    '''Using Manhattan distance, i.e. agents can't travel diagonally'''
     return abs(point1[0] - point2[0]) + abs(point1[1] - point2[1])
 
 
-def one_agent(inst_one, k_one, sites_one, demands_one):
-    '''Only move one agent'''
+def distances_to(grid, point):
+    '''Returns a list where the [k]th entry is the distance from the [k]th agent to [point]'''
+    return [distance(point, grid.servers[i]) for i in range(grid.inst.k)]
 
+
+def closest_to(grid, point):
+    '''Returns the agent closest to [point]'''
+    dist = distances_to(grid, point)
+    return dist.index(min(dist))
+
+
+def run(inst, strategy, make_video = True):
+    '''
+    Solves [inst] using [strategy].
+    '''
     total_dist = 0
-    iteration = 0
-    pos = [[0, 0] for _ in range(k_one)]
+    grid = Grid(grid_size, inst)
 
-    for dem in demands_one:
+    for i, req in enumerate(inst.requests):
+        req_pos = inst.sites[req]
+        if make_video:
+            plot_grid_and_servers(inst, i, grid, strategy.name, total_dist)
+        agent = strategy.choose_agent(inst, grid, req)
+        total_dist += distance(req_pos, grid.servers[agent])
+        grid.servers[agent] = req_pos
 
-        req_pos = sites_one[dem]
-
-        plot_grid_and_servers(inst_one, iteration, grid, pos, "one", total_dist)
-        iteration += 1
-
-        total_dist += distance(req_pos, pos[0])
-        pos[0] = req_pos
-
-    make_videos_from_images(inst_one, "one")
+    if make_video:
+        make_videos_from_images(inst, strategy.name)
     return total_dist
 
 
-def use_nearest_agent(inst_near, k_near, sites_near, demands_near):
-    '''Move the nearest agent'''
+class OneAgent:
+    '''Only moves the first agent'''
+    def __init__(self):
+        self.name = "one"
 
-    total_dist = 0
-    pos = [[0, 0] for _ in range(k_near)]
-    iteration = 0
-
-    for dem in demands_near:
-
-        req_pos = sites_near[dem]
-
-        plot_grid_and_servers(inst_near, iteration, grid, pos, "nearest", total_dist)
-        iteration += 1
-
-        # Compute distances
-        dist = [distance(req_pos, pos[i]) for i in range(k_near)]
-        moving_agent = dist.index(min(dist))  # Get the nearest agent
-
-        total_dist += dist[moving_agent]
-        pos[moving_agent] = req_pos
-
-    make_videos_from_images(inst_near, "nearest")
-    return total_dist
+    def choose_agent(self, inst, grid, request):
+        return 0
 
 
-def use_nearest_agent_positioned(inst_near_p, k_near_p, sites_near_p, demands_near_p):
-    '''Move the nearest agent
-    We first position each agent on the diagonal axis such that each agent
-        is activated'''
+class NearestAgent:
+    '''Moves the nearest agent'''
+    def __init__(self):
+        self.name = "nearest"
 
-    total_dist = 0
-    pos = [[0, 0] for _ in range(k_near_p)]
-    step = (grid_size//k_near_p)
-    iteration = 0
-
-    # Setting up agents
-    for agent in range(k_near_p):
-
-        plot_grid_and_servers(inst_near_p, iteration, grid, pos, "nearestpos", total_dist)
-        iteration += 1
-
-        agent_pos = [agent*step, agent*step]
-        total_dist += distance([0, 0], agent_pos)
-        pos[agent] = agent_pos
-
-    for dem in demands_near_p:
-
-        req_pos = sites_near_p[dem]
-
-        plot_grid_and_servers(inst_near_p, iteration, grid, pos, "nearestpos", total_dist)
-        iteration += 1
-
-        # Compute distances
-        dist = [distance(req_pos, pos[i]) for i in range(k_near_p)]
-        moving_agent = dist.index(min(dist))  # Get the nearest one
-
-        total_dist += dist[moving_agent]
-        pos[moving_agent] = req_pos
-
-    make_videos_from_images(inst_near_p, "nearestpos")
-    return total_dist
+    def choose_agent(self, inst, grid, request):
+        return closest_to(grid, inst.sites[request])
 
 
-def use_nearest_agent_positioned_bis(inst_near_p2, k_near_p2, sites_near_p2, demands_near_p2):
-    '''Move the nearest agent
-    We first position each agent at a site when the first requests arrive
-        so that there will be more agents moving and sites covered at the
-        same time'''
+class NearestAgentBis:
+    '''
+    Moves the nearest agent, but first each agent is positioned at the sites of the k first requests,
+    so that there will be a better cover of the grid by the agents
+    '''
+    def __init__(self):
+        self.name = "nearbis"
 
-    total_dist = 0
-    pos = [[0, 0] for _ in range(k_near_p2)]
-    iteration = 0
-
-    for dem in demands_near_p2:
-
-        req_pos = sites_near_p2[dem]
-
-        plot_grid_and_servers(inst_near_p2, iteration, grid, pos, "nearposbis", total_dist)
-        iteration += 1
-
-        if req_pos not in pos and [0, 0] in pos:
-
-            moving_agent = pos.index([0, 0])
-            total_dist += distance([0, 0], req_pos)
-
+    def choose_agent(self, inst, grid, request):
+        req_pos = inst.sites[request]
+        if req_pos not in grid.servers and (0, 0) in grid.servers:
+            return grid.servers.index((0, 0))
         else:
-
-            dist = [distance(req_pos, pos[i]) for i in range(k_near_p2)]
-            moving_agent = dist.index(min(dist))
-
-            total_dist += dist[moving_agent]
-
-        pos[moving_agent] = req_pos
-
-    make_videos_from_images(inst_near_p2, "nearposbis")
-    return total_dist
+            return closest_to(grid, req_pos)
 
 
-def positioned_then_random(inst_random_p, k_random_p, sites_random_p, demands_random_p):
-    '''Move a random agent
-    We first position each agent at a site when the first requests arrive
-        so that there will be more agents moving and sites covered at the
-        same time'''
+class NearestAgentTer:
+    '''
+    Similar to [NearestAgentBis], but if the site is too far away from the start
+    (at least [limit] steps), another agent is dispatched.
+    This can be useful when it is the last request in short sequences.
+    '''
+    def __init__(self, limit):
+        self.name = "nearter"
+        self.limit = limit
 
-    total_dist = 0
-    pos = [[0, 0] for _ in range(k_random_p)]
-    iteration = 0
-
-    for dem in demands_random_p:
-
-        req_pos = sites_random_p[dem]
-        plot_grid_and_servers(inst_random_p, iteration, grid, pos, "posrandom", total_dist)
-        iteration += 1
-
-        if req_pos not in pos:
-            if [0, 0] in pos:
-                moving_agent = pos.index([0, 0])
-                total_dist += distance([0, 0], req_pos)
+    def choose_agent(self, inst, grid, request):
+        req_pos = inst.sites[request]
+        if req_pos in grid.servers:
+            return grid.servers.index(req_pos)
+        else:
+            dist = distances_to(grid, req_pos)
+            if (0, 0) in grid.servers and distance(req_pos, (0, 0)) < self.limit:
+                return grid.servers.index((0, 0))
             else:
-                moving_agent = random.randint(0, k_random_p-1)
-                total_dist += distance(req_pos, pos[moving_agent])
-            pos[moving_agent] = req_pos
-
-    make_videos_from_images(inst_random_p, "posrandom")
-    return total_dist
+                return dist.index(min(dist))
 
 
-def use_nearest_agent_positioned_ter(inst_near_p3, k_near_p3, sites_near_p3, demands_nearest_p3, limit):
-    '''Move the nearest agent
-    We first position each agent at a site when the first requests arrive
-        so that there will be more agents moving and sites covered at the
-        same time
-    If the site is too far away from start (n steps), we move another agent,
-        it is useful in case it is the last request (for short sequences)'''
-    total_dist = 0
-    pos = [[0, 0] for _ in range(k_near_p3)]
-    iteration = 0
-    for dem in demands_nearest_p3:
+class PositionedThenRandom:
+    '''
+    Moves a random agent, but first each agent is positioned at the sites of the k first requests.
+    '''
+    def __init__(self):
+        self.name = "posrandom"
 
-        req_pos = sites_near_p3[dem]
-        plot_grid_and_servers(inst_near_p3, iteration, grid, pos, "nearposter", total_dist)
-        iteration += 1
-
-        if req_pos not in pos:
-
-            dist = [distance(req_pos, pos[i]) for i in range(k_near_p3)]
-
-            if [0, 0] in pos and distance(req_pos, [0, 0]) < limit:
-
-                moving_agent = pos.index([0, 0])
-                total_dist += dist[moving_agent]
-
-            else:
-
-                moving_agent = dist.index(min(dist))
-                total_dist += dist[moving_agent]
-
-            pos[moving_agent] = req_pos
-
-    make_videos_from_images(inst_near_p3, "nearposter")
-    return total_dist
+    def choose_agent(self, inst, grid, request):
+        req_pos = inst.sites[request]
+        if req_pos in grid.servers:
+            return grid.servers.index(req_pos)
+        elif (0, 0) in grid.servers:
+            return grid.servers.index((0, 0))
+        else:
+            return random.randint(0, inst.k-1)
 
 
-def random_agent(inst_random, k_random, sites_random, demands_random):
-    '''Move a random agent'''
-
-    total_dist = 0
-    pos = [[0, 0] for _ in range(k_random)]
-    iteration = 0
-
-    for dem in demands_random:
-
-        req_pos = sites_random[dem]
-
-        plot_grid_and_servers(inst_random, iteration, grid, pos, "random", total_dist)
-        iteration += 1
-
-        # Get a random agent
-        moving_agent = random.randint(0, k_random-1)
-
-        total_dist += distance(req_pos, pos[moving_agent])
-        pos[moving_agent] = req_pos
-
-    make_videos_from_images(inst_random, "random")
-    return total_dist
+class Random:
+    '''Moves a random agent'''
+    def __init__(self):
+        self.name = "random"
+    
+    def choose_agent(self, inst, grid, request):
+        return random.randint(0, inst.k-1)
 
 
-def random_agent_bis(inst_random2, k_random2, sites_random2, demands_random2):
-    '''Move a random agent
-
-    Slightly different : D o not move if the request is already satisfied !'''
-
-    total_dist = 0
-    pos = [[0, 0] for _ in range(k_random2)]
-    iteration = 0
-
-    for dem in demands_random2:
-
-        req_pos = sites_random2[dem]
-
-        plot_grid_and_servers(inst_random2, iteration, grid, pos, "randombis", total_dist)
-        iteration += 1
-
-        if req_pos not in pos:
-
-            # Get a random agent
-            moving_agent = random.randint(0, k_random2-1)
-
-            total_dist += distance(req_pos, pos[moving_agent])
-            pos[moving_agent] = req_pos
-
-    make_videos_from_images(inst_random2, "randombis")
-    return total_dist
+class RandomBis:
+    '''Moves a random agent, but does not move if the request is already satisfied'''
+    def __init__(self):
+        self.name = "randombis"
+    
+    def choose_agent(self, inst, grid, request):
+        req_pos = inst.sites[request]
+        if req_pos in grid.servers:
+            return grid.servers.index(req_pos)
+        else:
+            return random.randint(0, inst.k-1)
 
 
-def round_robin(inst_round, k_round, sites_round, demands_round):
-    '''Each agent moves one after another
+class RoundRobin:
+    ''' Each agent moves in turn '''
+    def __init__(self):
+        self.name = "roundrobin"
+        self.last_moved = 0
 
-    If the sequence of moved agents is
-    1, 2, 3, ..., k_round, 1
-    Then the moving agent will be 2 for this request '''
-    last_moved = 0
-    total_dist = 0
-    pos = [[0, 0] for _ in range(k_round)]
-    iteration = 0
-
-    for dem in demands_round:
-
-        req_pos = sites_round[dem]
-
-        plot_grid_and_servers(inst_round, iteration, grid, pos, "roundrobin", total_dist)
-        iteration += 1
-
-        if req_pos not in pos:
-
-            # We checkwho was the last moved, and move the following one
-            moving_agent = (last_moved+1) % k_round
-
-            total_dist += distance(req_pos, pos[moving_agent])
-            pos[moving_agent] = req_pos
-            last_moved = moving_agent
-
-    make_videos_from_images(inst_round, "roundrobin")
-    return total_dist
+    def choose_agent(self, inst, grid, request):
+        req_pos = inst.sites[request]
+        if req_pos in grid.servers:
+            return grid.servers.index(req_pos)
+        else:
+            agent = (self.last_moved+1) % inst.k
+            self.last_moved = agent
+            return agent
 
 
-def own_area(inst_own, k_own, sites_own, demands_own):
-    '''Each agent watch a zone (step lines)
+class OwnArea:
+    '''
+    Each agent watch a zone (step lines)
 
     If we have a 4x4 grid and 4 agents, the distribution will look like that
     |1___|
@@ -380,26 +278,16 @@ def own_area(inst_own, k_own, sites_own, demands_own):
     |3___|
     |4___|
     '''
-    total_dist = 0
-    step = (grid_size//k_own)
-    pos = [[0, 0] for _ in range(k_own)]
-    iteration = 0
+    def __init__(self):
+        self.name = "own"
 
-    for dem in demands_own:
-
-        req_pos = sites_own[dem]
-
-        plot_grid_and_servers(inst_own, iteration, grid, pos, "own", total_dist)
-        iteration += 1
-
-        # We check in whom square the request is
-        moving_agent = req_pos[0]//step
-
-        total_dist += distance(req_pos, pos[moving_agent])
-        pos[moving_agent] = req_pos
-
-    make_videos_from_images(inst_own, "own")
-    return total_dist
+    def choose_agent(self, inst, grid, request):
+        req_pos = inst.sites[request]
+        if req_pos in grid.servers:
+            return grid.servers.index(req_pos)
+        else:
+            step = grid.size // inst.k
+            return req_pos[0] // step
 
 
 def get_squarish(number):
@@ -415,8 +303,9 @@ def get_squarish(number):
     return (squarish, number//squarish)
 
 
-def own_area_s(inst_own_s, k_own_s, sites_own_s, demands_own_s):
-    '''Each agent watch a zone (squarish zone)
+class OwnAreaS:
+    '''
+    Each agent watch a zone (squarish zone)
 
     If we have a 4x4 grid and 4 agents, the distribution will look like that
     |1 | 2|
@@ -424,201 +313,115 @@ def own_area_s(inst_own_s, k_own_s, sites_own_s, demands_own_s):
     |  |  |
     |3 | 4|
     '''
-    total_dist = 0
-    (lines, columns) = get_squarish(k_own_s)  # Get squarish decomposition of k
-    l_step = grid_size//lines
-    c_step = grid_size//columns
-    pos = [[0, 0] for _ in range(k_own_s)]
-    iteration = 0
+    def __init__(self):
+        self.name = "owns"
 
-    for dem in demands_own_s:
-
-        req_pos = sites_own_s[dem]
-
-        plot_grid_and_servers(inst_own_s, iteration, grid, pos, "owns", total_dist)
-        iteration += 1
-
-        # We check in whom square the request is
-        moving_agent = req_pos[0]//l_step + req_pos[1]//c_step
-
-        total_dist += distance(req_pos, pos[moving_agent])
-        pos[moving_agent] = req_pos
-
-    make_videos_from_images(inst_own_s, "owns")
-    return total_dist
-
-
-def popular_places(inst_pop, k_pop, sites_pop, demands_pop):
-    '''Move the nearest agent
-    We first position each agent at a site when the first requests arrive
-        so that there will be more agents moving and sites covered at the
-        same time'''
-
-    total_dist = 0
-    pos = [[0, 0] for _ in range(k_pop)]
-    iteration = 0
-
-    spots = {}
-
-    for dem in demands_pop:
-
-        req_pos = sites_pop[dem]
-
-        if dem not in spots:
-            spots[dem] = 1
+    def choose_agent(self, inst, grid, request):
+        req_pos = inst.sites[request]
+        if req_pos in grid.servers:
+            return grid.servers.index(req_pos)
         else:
-            spots[dem] += 1
-
-        if req_pos not in pos:
-            agents_spot = [0 for _ in range(k_pop)]
-            for agent in range(k_pop):
-                if pos[agent] in sites_pop:
-                    agents_spot[agent] = spots[sites_pop.index(pos[agent])]
-
-            plot_grid_and_servers(inst_pop, iteration, grid, pos, "pop", total_dist)
-            iteration += 1
-
-            moving_agent = agents_spot.index(min(agents_spot))
-            # print("pos =", pos, " moving=", moving_agent, " places=", spots)
-            total_dist += distance(pos[moving_agent], req_pos)
-            pos[moving_agent] = req_pos
-
-    make_videos_from_images(inst_pop, "pop")
-    return total_dist
+            (lines, columns) = get_squarish(inst.k)  # Get squarish decomposition of k
+            l_step = grid_size // lines
+            c_step = grid_size // columns
+            return req_pos[0] // l_step + req_pos[1] // c_step
 
 
-def popular_places_bis(inst_pop2, k_pop2, sites_pop2, demands_pop2):
-    '''Move the nearest agent
-    We first position each agent at a site when the first requests arrive
-        so that there will be more agents moving and sites covered at the
-        same time'''
+class PopularPlaces:
+    '''
+    No description (the old one was the same as nearest_agent_positioned)
+    Also the [agents_spot.index(...)] seems really weird to me, because
+    there are very likely more sites than servers (otherwise the problem is trivial),
+    so quickly this strategy will just return the agent closest to the top left corner...
+    That does not seem very interesting
+    '''
+    def __init__(self):
+        self.name = "pop"
+        self.spots = {}
 
-    total_dist = 0
-    pos = [[0, 0] for _ in range(k_pop2)]
-    iteration = 0
-
-    spots = {}
-
-    for dem in demands_pop2:
-
-        req_pos = sites_pop2[dem]
-
-        if dem not in spots:
-            spots[dem] = 1
+    def choose_agent(self, inst, grid, request):
+        req_pos = inst.sites[request]
+        if request not in self.spots:
+            self.spots[request] = 1
         else:
-            spots[dem] += 1
+            self.spots[request] += 1
+        
+        if req_pos in grid.servers:
+            return grid.servers.index(req_pos)
+        else:
+            agents_spot = [0 for _ in range(inst.k)]
+            for agent in range(inst.k):
+                if grid.servers[agent] in inst.sites:
+                    agents_spot[agent] = self.spots[inst.sites.index(grid.servers[agent])]
+            return agents_spot.index(min(agents_spot))
 
-        if req_pos not in pos:
-            agents_spot = [0 for _ in range(k_pop2)]
-            for agent in range(k_pop2):
-                if pos[agent] in sites_pop2:
-                    agents_spot[agent] = spots[sites_pop2.index(pos[agent])]
 
-            plot_grid_and_servers(inst_pop2, iteration, grid, pos, "pop2", total_dist)
-            iteration += 1
+class PopularPlacesBis:
+    '''No description'''
+    def __init__(self):
+        self.name = "pop2"
+        self.spots = {}
 
-            # print("agents places", agents_spot)
+    def choose_agent(self, inst, grid, request):
+        req_pos = inst.sites[request]
+        if request not in self.spots:
+            self.spots[request] = 1
+        else:
+            self.spots[request] += 1
+
+        if req_pos in grid.servers:
+            return grid.servers.index(req_pos)
+        else:
+            agents_spot = [0 for _ in range(inst.k)]
+            for agent in range(inst.k):
+                if grid.servers[agent] in inst.sites:
+                    agents_spot[agent] = self.spots[inst.sites.index(grid.servers[agent])]
             mini = min(agents_spot)
-            less_visited = [i for i in range(k_pop2) if agents_spot[i] == mini]
-            # print("less visited", less_visited)
-
-            dist = [(i, distance(req_pos, pos[i])) for i in less_visited]
+            less_visited = [i for i in range(inst.k) if agents_spot[i] == mini]
+            dist = [(i, distance(req_pos, grid.servers[i])) for i in less_visited]
             v = min(dist, key=lambda x: x[1])
-
-            # print(dist, v, dist.index(v))
-            moving_agent, dist_moving = dist[dist.index(v)]
-            # print("moving", moving_agent)
-            # print("pos =", pos, " moving=", moving_agent, " places=", spots)
-            total_dist += dist_moving
-            pos[moving_agent] = req_pos
-
-    make_videos_from_images(inst_pop2, "pop2")
-    return total_dist
+            return dist[dist.index(v)][0]
 
 
 if __name__ == '__main__':
+
+    strategies = [
+        OneAgent,
+        NearestAgent,
+        NearestAgentBis,
+        #NearestAgentTer,
+        Random,
+        RandomBis,
+        RoundRobin,
+        OwnArea,
+        OwnAreaS,
+        PopularPlacesBis
+    ]
+    results = {S.__name__: [] for S in strategies}
 
     # Get all test instances names
     for root, dirs, files in os.walk(root_dir):
         for fileName in files:
             fileSet.add(root_dir + "/" + fileName)
 
-    results = {"one_agent": [],
-               "nearest_agent": [],
-               "nearest_agent_positioned": [],
-               "nearest_agent_positioned_optimized": [],
-               "nearest_agent_positioned_optimized2": [],
-               "random_agent": [],
-               "random_agent_optimized": [],
-               "round_robin": [],
-               "own_area": [],
-               "own_area_s": [],
-               "popular_places": [],
-               "popular_places_optimized": [],
-               "positioned_then_random": []}
-
-    i = 0
-    for file in fileSet:
+    for i, file in enumerate(fileSet):
 
         # Uncomment if you want to test on only one instance
         # if i != 0:
         #     break
 
-        i+=1
-
         # Parsing file
-        opt, k, sites, demands = parse_file(file)
+        inst = Instance(file)
 
         # Header
         print("==============")
         print("Results for file ", file)
-        print("Optimal value :", opt)
+        print("Optimal value :", inst.opt)
 
-        inst = file
-        # Computations
-        one_a = one_agent(inst, k, sites, demands)
-        nearest = use_nearest_agent(inst, k, sites, demands)
-        nearest_p = use_nearest_agent_positioned(inst, k, sites, demands)
-        nearest_p_2 = use_nearest_agent_positioned_bis(inst, k, sites, demands)
-        nearest_p_3 = use_nearest_agent_positioned_ter(inst, k, sites, demands, 180)
-        random_p = positioned_then_random(inst, k, sites, demands)
-        random_a = random_agent(inst, k, sites, demands)
-        random_a_2 = random_agent_bis(inst, k, sites, demands)
-        round_r = round_robin(inst, k, sites, demands)
-        area = own_area(inst, k, sites, demands)
-        area_s = own_area_s(inst, k, sites, demands)
-        pop = popular_places(inst, k, sites, demands)
-        pop2 = popular_places_bis(inst, k, sites, demands)
-
-        # Verbose
-        print("Use One agent algorithm (Move only one agent) :", one_a)
-        print("Use nearest agent : ", nearest)
-        print("Use nearest agent positioned : ", nearest_p)
-        print("Use nearest agent positioned optimized : ", nearest_p_2)
-        print("Use nearest agent positioned optimized2 : ", nearest_p_3)
-        print("Use random agent : ", random_a)
-        print("Use random agent optimized : ", random_a_2)
-        print("Use round robin : ", round_r)
-        print("Use own area : ", area)
-        print("Use own area_s : ", area_s)
-        print("Use positioned then random", random_p)
-        print("Use popular places", pop)
-        print("Use popular places optimized", pop2)
-
-        # Saving results
-        results["one_agent"].append(opt*100/one_a)
-        results["nearest_agent"].append(opt*100/nearest)
-        results["nearest_agent_positioned"].append(opt*100/nearest_p)
-        results["nearest_agent_positioned_optimized"].append(opt*100/nearest_p_2)
-        results["nearest_agent_positioned_optimized2"].append(opt*100/nearest_p_3)
-        results["positioned_then_random"].append(opt*100/random_p)
-        results["random_agent"].append(opt*100/random_a)
-        results["random_agent_optimized"].append(opt*100/random_a_2)
-        results["round_robin"].append(opt*100/round_r)
-        results["own_area"].append(opt*100/area)
-        results["own_area_s"].append(opt*100/area_s)
-        results["popular_places"].append(opt*100/pop)
-        results["popular_places_optimized"].append(opt*100/pop2)
+        for S in strategies:
+            score = run(inst, S(), False)
+            print(f"With {S.__name__}: {score}")
+            results[S.__name__].append(inst.opt*100 / score)
 
     print("")
 
