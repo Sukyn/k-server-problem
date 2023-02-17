@@ -51,7 +51,7 @@ class Instance:
                     if line == "\n":  # No more sites
                         ended_sites = i + 2
                     else:
-                        self.sites.append(list(map(int, line.strip().split(" "))))
+                        self.sites.append(tuple(map(int, line.strip().split(" "))))
 
                 # Get requests from line k+2 to end of file
                 # (should only be one line usually)
@@ -68,12 +68,16 @@ class Grid:
     [size]: size of the grid (length = width)
     [grid]: actual grid data structure
     [servers]: current position of the servers
+    [agent_count]: how many times each agent has been used
+    [site_count]: how many times each site has been visited
     '''
     def __init__(self, size, inst):
         self.inst = inst
         self.size = size
         self.grid = np.zeros((size, size))
         self.servers = [(0, 0) for _ in range(inst.k)]
+        self.agent_count = [0 for _ in range(inst.k)]
+        self.site_count = [0 for _ in inst.sites]
 
 
 def make_videos_from_images(inst, algo_p):
@@ -149,6 +153,8 @@ def run(inst, strategy, make_video = True):
         if make_video:
             plot_grid_and_servers(inst, i, grid, strategy.name, total_dist)
         agent = strategy.choose_agent(inst, grid, req)
+        grid.agent_count[agent] += 1
+        grid.site_count[req] += 1
         total_dist += distance(req_pos, grid.servers[agent])
         grid.servers[agent] = req_pos
 
@@ -444,8 +450,11 @@ class MinimizeDistance:
     def choose_agent(self, inst, grid, request):
         # Extremely inefficient implementation
         req_pos = inst.sites[request]
-        means = [predict_mean_distance(grid, a, req_pos) for a in range(inst.k)]
-        return means.index(min(means))
+        if req_pos in grid.servers:
+            return grid.servers.index(req_pos)
+        else:
+            means = [predict_mean_distance(grid, a, req_pos) for a in range(inst.k)]
+            return means.index(min(means))
 
 
 class MinimizeDistanceBis:
@@ -454,19 +463,30 @@ class MinimizeDistanceBis:
     '''
     def __init__(self, extra = {}):
         self.name = "mindistbis"
-        self.count = {}
     
     def choose_agent(self, inst, grid, request):
         req_pos = inst.sites[request]
-        
-        if request in self.count:
-            self.count[request] += 1
+        if req_pos in grid.servers:
+            return grid.servers.index(req_pos)
         else:
-            self.count[request] = 1
+            means = [predict_mean_distance(grid, a, req_pos, grid.site_count) for a in range(inst.k)]
+            return means.index(min(means))
 
-        means = [predict_mean_distance(grid, a, req_pos, self.count) for a in range(inst.k)]
-        return means.index(min(means))
 
+class LeastUsedAgent:
+    '''
+    Chooses the agent that moved the least.
+    '''
+    def __init__(self, extra = {}):
+        self.name = "leastused"
+    
+    def choose_agent(self, inst, grid, request):
+        req_pos = inst.sites[request]
+        if req_pos in grid.servers:
+            return grid.servers.index(req_pos)
+        else:
+            return grid.agent_count.index(min(grid.agent_count))
+        
 
 if __name__ == '__main__':
 
@@ -484,8 +504,8 @@ if __name__ == '__main__':
         # (Composition, {"s1": NearestAgentBis, "s2": PopularPlacesBis}),
         (MinimizeDistance, {}),
         (MinimizeDistanceBis, {}),
-        (Composition, {"s1": NearestAgentBis, "s2": MinimizeDistance,    "proba": 0.9}),
-        (Composition, {"s1": NearestAgentBis, "s2": MinimizeDistanceBis, "proba": 0.9})
+        (Composition, {"s1": NearestAgentBis, "proba": 0.9,   "s2": MinimizeDistanceBis}),
+        (Composition, {"s1": NearestAgentBis, "proba": 0.9, "s2": LeastUsedAgent})
     ]
     results = {strategy_name(S, e): [] for S, e in strategies}
 
