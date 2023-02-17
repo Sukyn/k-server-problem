@@ -157,9 +157,14 @@ def run(inst, strategy, make_video = True):
     return total_dist
 
 
+def strategy_name(S, extra):
+    #args = ", ".join([f"{n}={v}" for n, v in extra.items()])
+    return f"{S(extra).name}"
+
+
 class OneAgent:
     '''Only moves the first agent'''
-    def __init__(self):
+    def __init__(self, extra = {}):
         self.name = "one"
 
     def choose_agent(self, inst, grid, request):
@@ -168,7 +173,7 @@ class OneAgent:
 
 class NearestAgent:
     '''Moves the nearest agent'''
-    def __init__(self):
+    def __init__(self, extra = {}):
         self.name = "nearest"
 
     def choose_agent(self, inst, grid, request):
@@ -180,7 +185,7 @@ class NearestAgentBis:
     Moves the nearest agent, but first each agent is positioned at the sites of the k first requests,
     so that there will be a better cover of the grid by the agents
     '''
-    def __init__(self):
+    def __init__(self, extra = {}):
         self.name = "nearbis"
 
     def choose_agent(self, inst, grid, request):
@@ -197,9 +202,9 @@ class NearestAgentTer:
     (at least [limit] steps), another agent is dispatched.
     This can be useful when it is the last request in short sequences.
     '''
-    def __init__(self, limit):
+    def __init__(self, extra = {}):
         self.name = "nearter"
-        self.limit = limit
+        self.limit = extra["limit"] if "limit" in extra else 100
 
     def choose_agent(self, inst, grid, request):
         req_pos = inst.sites[request]
@@ -217,7 +222,7 @@ class PositionedThenRandom:
     '''
     Moves a random agent, but first each agent is positioned at the sites of the k first requests.
     '''
-    def __init__(self):
+    def __init__(self, extra = {}):
         self.name = "posrandom"
 
     def choose_agent(self, inst, grid, request):
@@ -232,7 +237,7 @@ class PositionedThenRandom:
 
 class Random:
     '''Moves a random agent'''
-    def __init__(self):
+    def __init__(self, extra = {}):
         self.name = "random"
     
     def choose_agent(self, inst, grid, request):
@@ -241,7 +246,7 @@ class Random:
 
 class RandomBis:
     '''Moves a random agent, but does not move if the request is already satisfied'''
-    def __init__(self):
+    def __init__(self, extra = {}):
         self.name = "randombis"
     
     def choose_agent(self, inst, grid, request):
@@ -254,7 +259,7 @@ class RandomBis:
 
 class RoundRobin:
     ''' Each agent moves in turn '''
-    def __init__(self):
+    def __init__(self, extra = {}):
         self.name = "roundrobin"
         self.last_moved = 0
 
@@ -278,7 +283,7 @@ class OwnArea:
     |3___|
     |4___|
     '''
-    def __init__(self):
+    def __init__(self, extra = {}):
         self.name = "own"
 
     def choose_agent(self, inst, grid, request):
@@ -313,7 +318,7 @@ class OwnAreaS:
     |  |  |
     |3 | 4|
     '''
-    def __init__(self):
+    def __init__(self, extra = {}):
         self.name = "owns"
 
     def choose_agent(self, inst, grid, request):
@@ -335,7 +340,7 @@ class PopularPlaces:
     so quickly this strategy will just return the agent closest to the top left corner...
     That does not seem very interesting
     '''
-    def __init__(self):
+    def __init__(self, extra = {}):
         self.name = "pop"
         self.spots = {}
 
@@ -358,7 +363,7 @@ class PopularPlaces:
 
 class PopularPlacesBis:
     '''No description'''
-    def __init__(self):
+    def __init__(self, extra = {}):
         self.name = "pop2"
         self.spots = {}
 
@@ -369,6 +374,7 @@ class PopularPlacesBis:
         else:
             self.spots[request] += 1
 
+        # TODO Introduced a bug somewhere here
         if req_pos in grid.servers:
             return grid.servers.index(req_pos)
         else:
@@ -383,21 +389,105 @@ class PopularPlacesBis:
             return dist[dist.index(v)][0]
 
 
+class Composition:
+    '''
+    A randomized strategy that randomly chooses between two different astrategies.
+    TODO: cannot use strategies with extra arguments yet.
+    '''
+    def __init__(self, extra = {}):
+        assert "s1" in extra and "s2" in extra
+        self.s1 = extra["s1"]()
+        self.s2 = extra["s2"]()
+        self.proba = extra["proba"] if "proba" in extra else 0.5
+        assert self.proba >= 0 and self.proba <= 1
+
+        self.name = f"{self.s1.name}[{self.proba}] ° {self.s2.name}"
+    
+    def choose_agent(self, inst, grid, request):
+        s = self.s1 if random.random() <= self.proba else self.s2
+        return s.choose_agent(inst, grid, request)
+
+
+def mean_distance(grid, weights = None):
+    '''
+    Returns the mean distance from any site to its closest agent.
+    '''
+    if weights is None:
+        weights = [1 for _ in grid.inst.sites]
+    dist = []
+    for i, site in enumerate(grid.inst.sites):
+        agent = closest_to(grid, site)
+        dist.append(weights[i] * distance(site, grid.servers[agent]))
+    return sum(dist) / sum(weights)
+
+
+def predict_mean_distance(grid, agent, pos, weights = None):
+    '''
+    Returns the mean distance from any site to its closest agent,
+    if [agent] is positioned at [pos].
+    '''
+    original = grid.servers[agent]
+    grid.servers[agent] = pos
+    mean = mean_distance(grid)
+    # Revert back to original position
+    grid.servers[agent] = original
+    return mean
+
+
+class MinimizeDistance:
+    '''
+    Chooses the agent that minimizes the mean distance.
+    '''
+    def __init__(self, extra = {}):
+        self.name = "mindist"
+    
+    def choose_agent(self, inst, grid, request):
+        # Extremely inefficient implementation
+        req_pos = inst.sites[request]
+        means = [predict_mean_distance(grid, a, req_pos) for a in range(inst.k)]
+        return means.index(min(means))
+
+
+class MinimizeDistanceBis:
+    '''
+    Chooses the agent that minimizes the mean distance, weighted by each site's visit rate.
+    '''
+    def __init__(self, extra = {}):
+        self.name = "mindistbis"
+        self.count = {}
+    
+    def choose_agent(self, inst, grid, request):
+        req_pos = inst.sites[request]
+        
+        if request in self.count:
+            self.count[request] += 1
+        else:
+            self.count[request] = 1
+
+        means = [predict_mean_distance(grid, a, req_pos, self.count) for a in range(inst.k)]
+        return means.index(min(means))
+
+
 if __name__ == '__main__':
 
     strategies = [
-        OneAgent,
-        NearestAgent,
-        NearestAgentBis,
-        #NearestAgentTer,
-        Random,
-        RandomBis,
-        RoundRobin,
-        OwnArea,
-        OwnAreaS,
-        PopularPlacesBis
+        # (OneAgent, {}),
+        # (NearestAgent, {}),
+        (NearestAgentBis, {}),
+        # (NearestAgentTer, {"limit": 100}),
+        # (Random, {}),
+        # (RandomBis, {}),
+        # (RoundRobin, {}),
+        # (OwnArea, {}),
+        # (OwnAreaS, {}),
+        # (PopularPlacesBis, {}),
+        # (Composition, {"s1": NearestAgentBis, "s2": PopularPlacesBis}),
+        (MinimizeDistance, {}),
+        (MinimizeDistanceBis, {}),
+        (Composition, {"s1": NearestAgentBis, "s2": MinimizeDistance,    "proba": 0.9}),
+        (Composition, {"s1": NearestAgentBis, "s2": MinimizeDistanceBis, "proba": 0.9})
     ]
-    results = {S.__name__: [] for S in strategies}
+    results = {strategy_name(S, e): [] for S, e in strategies}
 
     # Get all test instances names
     for root, dirs, files in os.walk(root_dir):
@@ -418,10 +508,11 @@ if __name__ == '__main__':
         print("Results for file ", file)
         print("Optimal value :", inst.opt)
 
-        for S in strategies:
-            score = run(inst, S(), False)
-            print(f"With {S.__name__}: {score}")
-            results[S.__name__].append(inst.opt*100 / score)
+        for S, extra in strategies:
+            name = strategy_name(S, extra)
+            score = run(inst, S(extra), False)
+            print(f"With {name}: {score}")
+            results[name].append(inst.opt*100 / score)
 
     print("")
 
